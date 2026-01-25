@@ -116,28 +116,15 @@ mod utils {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub url: String,
-    #[serde(default = "default_concurrency")]
+    #[serde(default = "utils::default_concurrency")]
     pub concurrency: usize, // 默认10
-    #[serde(default = "default_duration")]
+    #[serde(default = "utils::default_duration")]
     pub duration: Duration, // 默认10秒
-    #[serde(default = "default_batch_size")]
+    #[serde(default = "utils::default_batch_size")]
     pub batch_size: usize, // 默认1
 }
 
-/// 默认并发数
-fn default_concurrency() -> usize {
-    10
-}
 
-/// 默认测试时长
-fn default_duration() -> Duration {
-    Duration::from_secs(10)
-}
-
-/// 默认批量大小
-fn default_batch_size() -> usize {
-    1
-}
 
 /// 错误类型统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,83 +146,7 @@ pub struct LoadTestResult {
     pub error_stats: ErrorStats, // 详细的错误统计
 }
 
-/// 创建基于时间的请求流 - 持续生成任务直到测试时间结束
-fn create_request_stream(end_time: std::time::Instant) -> impl futures::Stream<Item = usize> {
-    let count = 0;
-    
-    // 使用unfold创建异步流，而不是使用sync迭代器包装，避免卡死
-    stream::unfold((count, end_time), |(mut count, end_time)| async move {
-        // 检查是否超过测试时间
-        if std::time::Instant::now() >= end_time {
-            return None;
-        }
-        
-        // 增加计数并返回
-        count += 1;
-        Some((count, (count, end_time)))
-    })
-}
 
-/// 请求处理策略 - 统一使用批量处理，支持单条和批量
-async fn process_requests(
-    client: Arc<reqwest::Client>,
-    url: Arc<String>,
-    successful: Arc<std::sync::atomic::AtomicU32>,
-    failed: Arc<std::sync::atomic::AtomicU32>,
-    total_latency: Arc<std::sync::Mutex<Duration>>,
-    connection_errors: Arc<std::sync::atomic::AtomicU32>,
-    timeout_errors: Arc<std::sync::atomic::AtomicU32>,
-    http_errors: Arc<std::sync::atomic::AtomicU32>,
-    other_errors: Arc<std::sync::atomic::AtomicU32>,
-    end_time: std::time::Instant,
-    batch_size: usize, // 批量大小，1表示单条处理
-) {
-    // 检查是否超过测试时间
-    if std::time::Instant::now() >= end_time {
-        return;
-    }
-    
-    // 统一使用批量处理逻辑，batch_size=1就是单条处理
-    let request_start = std::time::Instant::now();
-    
-    // 创建批量请求
-    let futures: Vec<_> = (0..batch_size)
-        .map(|_| client.get(url.as_str()).send())
-        .collect();
-    
-    // 批量等待所有请求完成
-    let results = futures::future::join_all(futures).await;
-    
-    // 处理批量结果
-    for result in results {
-        match result {
-            Ok(response) => {
-                // 检查HTTP状态码
-                if response.status().is_success() {
-                    successful.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let latency = request_start.elapsed();
-                    let mut guard = total_latency.lock().unwrap();
-                    *guard += latency;
-                } else {
-                    failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    http_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-            Err(e) => {
-                failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                
-                // 分类统计错误类型
-                if e.is_connect() {
-                    connection_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                } else if e.is_timeout() {
-                    timeout_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                } else {
-                    other_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-        }
-    }
-}
 
 // 直接使用serde默认值，不需要单独的配置处理函数
 
@@ -280,7 +191,7 @@ pub async fn run(config: Config) -> LoadTestResult {
     let end_time = start_time + config.duration;
     
     // 使用流式处理实现真正的高并发
-    let request_stream = create_request_stream(end_time);
+    let request_stream = utils::create_request_stream(end_time);
     
     let _results: Vec<()> = request_stream
         .map(|_| {
@@ -296,7 +207,7 @@ pub async fn run(config: Config) -> LoadTestResult {
             let end_time = end_time;
             
             async move {
-                process_requests(
+                utils::process_requests(
                     client, url, successful, failed, total_latency,
                     connection_errors, timeout_errors, http_errors, other_errors,
                     end_time, config.batch_size
