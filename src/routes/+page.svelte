@@ -48,24 +48,18 @@
     memoryHistory = [];
     
     try {
+      const config = {
+        url,
+        concurrency,
+        duration
+      };
+      
       if (enableMonitoring) {
         // 调用带监控的负载测试命令
-        testResult = await invoke("run_load_test_with_monitoring", {
-          config: {
-            url,
-            concurrency,
-            duration
-          }
-        });
+        testResult = await invoke("run_load_test_with_monitoring", { config });
       } else {
         // 调用原始负载测试命令
-        testResult = await invoke("run_load_test", {
-          config: {
-            url,
-            concurrency,
-            duration
-          }
-        });
+        testResult = await invoke("run_load_test", { config });
       }
     } catch (error) {
       console.error("负载测试失败:", error);
