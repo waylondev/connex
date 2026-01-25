@@ -25,11 +25,21 @@ pub fn print_test_result(result: &LoadTestResult) {
 /// 创建优化的HTTP客户端 - 支持高并发
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // 增加每个主机的最大空闲连接数
-        .pool_max_idle_per_host(500)
-        // 调整超时设置，适合长连接
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
+        // 调整连接池大小，由操作系统限制
+        .pool_max_idle_per_host(usize::MAX)
+        // 调整超时设置，适合高并发场景
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        // 启用TCP_NODELAY，减少延迟
+        .tcp_nodelay(true)
+        // 启用HTTP/1.1标题大小写转换
+        .http1_title_case_headers()
+        // 禁用自动重定向，减少不必要的请求
+        .redirect(reqwest::redirect::Policy::none())
+        // 禁用压缩，减少CPU开销
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
         .build()
         .expect("Failed to create HTTP client")
 }
