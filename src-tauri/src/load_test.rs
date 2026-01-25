@@ -7,9 +7,27 @@ use futures::stream::{self, StreamExt};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub url: String,
-    pub concurrency: usize,
-    pub duration: Duration,
-    pub batch_size: usize, // 批量大小配置
+    #[serde(default = "default_concurrency")]
+    pub concurrency: usize, // 默认10
+    #[serde(default = "default_duration")]
+    pub duration: Duration, // 默认10秒
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize, // 默认1
+}
+
+/// 默认并发数
+fn default_concurrency() -> usize {
+    10
+}
+
+/// 默认测试时长
+fn default_duration() -> Duration {
+    Duration::from_secs(10)
+}
+
+/// 默认批量大小
+fn default_batch_size() -> usize {
+    1
 }
 
 /// 错误类型统计
@@ -106,10 +124,19 @@ async fn process_requests(
     }
 }
 
+// 直接使用serde默认值，不需要单独的配置处理函数
+
 /// 执行负载测试 - 使用流式处理+buffer_unordered实现真正的高并发
 pub async fn run(config: Config) -> LoadTestResult {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    
+    // 打印负载测试参数
+    println!("开始负载测试:");
+    println!("URL: {}", config.url);
+    println!("并发数: {}", config.concurrency);
+    println!("测试时长: {:?}", config.duration);
+    println!("批量大小: {}", config.batch_size);
     
     let client = Arc::new(reqwest::Client::new());
     let url = Arc::new(config.url.clone());
@@ -198,7 +225,7 @@ mod tests {
             url: "http://httpbin.org/get".to_string(),
             concurrency: 10,
             duration: Duration::from_secs(10),
-            batch_size: 100,
+            batch_size: 1,
         };
         
         let result = run(config).await;
