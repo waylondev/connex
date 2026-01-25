@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicU32, Ordering}};
+use std::sync::{Arc, Mutex, atomic::{AtomicU32, AtomicU64, Ordering}};
 use std::time::Duration;
 use reqwest;
 use crate::load_test::{Config, LoadTestResult};
@@ -34,47 +34,7 @@ pub fn create_http_client() -> reqwest::Client {
         .expect("Failed to create HTTP client")
 }
 
-/// 处理单个HTTP请求的辅助方法 - 负载测试特有
-pub async fn process_single_request(
-    client: Arc<reqwest::Client>,
-    url: Arc<String>,
-    successful: Arc<AtomicU32>,
-    failed: Arc<AtomicU32>,
-    total_latency: Arc<Mutex<Duration>>,
-    connection_errors: Arc<AtomicU32>,
-    timeout_errors: Arc<AtomicU32>,
-    http_errors: Arc<AtomicU32>,
-    other_errors: Arc<AtomicU32>,
-) {
-    let request_start = std::time::Instant::now();
-    
-    match client.get(url.as_str()).send().await {
-        Ok(response) => {
-            // 检查HTTP状态码
-            if response.status().is_success() {
-                successful.fetch_add(1, Ordering::Relaxed);
-                let latency = request_start.elapsed();
-                let mut guard = total_latency.lock().unwrap();
-                *guard += latency;
-            } else {
-                failed.fetch_add(1, Ordering::Relaxed);
-                http_errors.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        Err(e) => {
-            failed.fetch_add(1, Ordering::Relaxed);
-            
-            // 分类统计错误类型
-            if e.is_connect() {
-                connection_errors.fetch_add(1, Ordering::Relaxed);
-            } else if e.is_timeout() {
-                timeout_errors.fetch_add(1, Ordering::Relaxed);
-            } else {
-                other_errors.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-}
+
 
 /// 默认并发数 - 负载测试特有
 pub fn default_concurrency() -> usize {
@@ -91,7 +51,7 @@ pub fn generate_test_result(
     start_time: std::time::Instant,
     successful: &Arc<AtomicU32>,
     failed: &Arc<AtomicU32>,
-    total_latency: &Arc<Mutex<Duration>>,
+    total_latency: &Arc<AtomicU64>,
     connection_errors: &Arc<AtomicU32>,
     timeout_errors: &Arc<AtomicU32>,
     http_errors: &Arc<AtomicU32>,
@@ -105,8 +65,9 @@ pub fn generate_test_result(
     let total_requests = total_successful + total_failed;
     
     let avg_latency = if total_successful > 0 {
-        // 将Duration转换为毫秒
-        (*total_latency.lock().unwrap() / total_successful).as_millis() as u64
+        // total_latency已经是毫秒值
+        let total_latency_ms = total_latency.load(Ordering::Relaxed);
+        total_latency_ms / total_successful as u64
     } else {
         0
     };

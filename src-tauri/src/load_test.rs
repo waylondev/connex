@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
-use futures::stream::StreamExt;
 
-// 导入模块：公共方法
-use crate::utils;
 // 导入模块：负载测试特有方法
 use crate::load_test_utils;
 
@@ -44,10 +42,10 @@ pub struct LoadTestResult {
 
 // 直接使用serde默认值，不需要单独的配置处理函数
 
-/// 执行负载测试 - 使用流式处理+buffer_unordered实现真正的高并发
+/// 执行负载测试 - 使用spawn直接创建task实现高并发
 pub async fn run(config: Config) -> LoadTestResult {
     use std::sync::atomic::AtomicU32;
-    use std::sync::Mutex;
+    use std::sync::atomic::AtomicU64;
     
     // 打印负载测试参数
     load_test_utils::print_test_config(&config);
@@ -59,7 +57,8 @@ pub async fn run(config: Config) -> LoadTestResult {
     // 使用Arc包装原子变量
     let successful = Arc::new(AtomicU32::new(0));
     let failed = Arc::new(AtomicU32::new(0));
-    let total_latency = Arc::new(Mutex::new(Duration::default()));
+    // 使用AtomicU64存储总延迟（毫秒），避免Mutex竞争
+    let total_latency = Arc::new(AtomicU64::new(0));
     
     // 错误类型统计
     let connection_errors = Arc::new(AtomicU32::new(0));
@@ -70,35 +69,64 @@ pub async fn run(config: Config) -> LoadTestResult {
     let start_time = std::time::Instant::now();
     let end_time = start_time + config.duration;
     
-    // 使用流式处理实现真正的高并发
-    let request_stream = utils::create_request_stream(end_time);
-    
-    // 并发处理请求，依赖request_stream内部的时间检查
-    let _results: Vec<()> = request_stream
-        .map(|_| {
-            // 必须克隆Arc引用，因为每个异步任务需要拥有自己的引用
-            // Arc::clone()是轻量级操作，仅增加引用计数
-            let client = Arc::clone(&client);
-            let url = Arc::clone(&url);
-            let successful = Arc::clone(&successful);
-            let failed = Arc::clone(&failed);
-            let total_latency = Arc::clone(&total_latency);
-            let connection_errors = Arc::clone(&connection_errors);
-            let timeout_errors = Arc::clone(&timeout_errors);
-            let http_errors = Arc::clone(&http_errors);
-            let other_errors = Arc::clone(&other_errors);
-            
-            async move {
-                // 调用load_test_utils模块的process_single_request函数处理单个请求
-                load_test_utils::process_single_request(
-                    client, url, successful, failed, total_latency,
-                    connection_errors, timeout_errors, http_errors, other_errors
-                ).await;
+    // 创建指定数量的并发task
+    let mut tasks = Vec::with_capacity(config.concurrency);
+    for _ in 0..config.concurrency {
+        // 克隆所有需要的Arc引用
+        let client = Arc::clone(&client);
+        let url = Arc::clone(&url);
+        let successful = Arc::clone(&successful);
+        let failed = Arc::clone(&failed);
+        let total_latency = Arc::clone(&total_latency);
+        let connection_errors = Arc::clone(&connection_errors);
+        let timeout_errors = Arc::clone(&timeout_errors);
+        let http_errors = Arc::clone(&http_errors);
+        let other_errors = Arc::clone(&other_errors);
+        let end_time = end_time;
+        
+        // 直接spawn task，每个task持续发送请求直到测试结束
+        let task = tokio::spawn(async move {
+            // 每个task内部是串行发送请求的循环
+            while std::time::Instant::now() < end_time {
+                // 发送单个请求并更新统计
+                let request_start = std::time::Instant::now();
+                
+                match client.get(url.as_str()).send().await {
+                    Ok(response) => {
+                        // 检查HTTP状态码
+                        if response.status().is_success() {
+                            successful.fetch_add(1, Ordering::Relaxed);
+                            // 计算延迟并更新原子变量（毫秒）
+                            let latency = request_start.elapsed().as_millis() as u64;
+                            total_latency.fetch_add(latency, Ordering::Relaxed);
+                        } else {
+                            failed.fetch_add(1, Ordering::Relaxed);
+                            http_errors.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                    Err(e) => {
+                        failed.fetch_add(1, Ordering::Relaxed);
+                        
+                        // 分类统计错误类型
+                        if e.is_connect() {
+                            connection_errors.fetch_add(1, Ordering::Relaxed);
+                        } else if e.is_timeout() {
+                            timeout_errors.fetch_add(1, Ordering::Relaxed);
+                        } else {
+                            other_errors.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                }
             }
-        })
-        .buffer_unordered(config.concurrency) // 直接控制HTTP请求并发度
-        .collect()
-        .await;
+        });
+        
+        tasks.push(task);
+    }
+    
+    // 等待所有task完成
+    for task in tasks {
+        task.await.unwrap();
+    }
     
     // 生成测试结果
     let result = load_test_utils::generate_test_result(
@@ -121,7 +149,7 @@ mod tests {
     async fn test_load_test() {
         let config = Config {
             url: "http://httpbin.org/get".to_string(),
-            concurrency: 500,
+            concurrency: 1000,
             duration: Duration::from_secs(10),
         };
         
