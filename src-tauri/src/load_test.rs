@@ -12,8 +12,13 @@ pub struct Config {
     pub url: String,
     #[serde(default = "load_test_utils::default_concurrency")]
     pub concurrency: usize, // 默认10
-    #[serde(default = "load_test_utils::default_duration")]
-    pub duration: Duration, // 默认10秒
+    #[serde(default = "default_duration_seconds")]
+    pub duration: u64, // 秒数，默认10秒
+}
+
+/// 默认测试时长（秒）
+pub fn default_duration_seconds() -> u64 {
+    10
 }
 
 
@@ -145,7 +150,7 @@ fn initialize_test_state(config: &Config) -> (Arc<TestState>, std::time::Instant
     });
     
     let start_time = std::time::Instant::now();
-    let end_time = start_time + config.duration;
+    let end_time = start_time + Duration::from_secs(config.duration);
     
     (test_state, start_time, end_time)
 }
@@ -281,9 +286,9 @@ mod tests {
     #[tokio::test]
     async fn test_load_test_simple() {
         let config = Config {
-            url: "http://localhost:3000".to_string(),
-            concurrency: 10000,
-            duration: Duration::from_secs(10),
+            url: "http://httpbin.org/get".to_string(),
+            concurrency: 10,
+            duration: 2, // 直接使用整数秒数
         };
         
         let result = run(config).await;
@@ -300,7 +305,7 @@ mod tests {
         let config = Config {
             url: "http://localhost:3000".to_string(),
             concurrency: 1000000,
-            duration: Duration::from_secs(10),
+            duration: 10, // 直接使用整数秒数
         };
         
         let result = run(config).await;

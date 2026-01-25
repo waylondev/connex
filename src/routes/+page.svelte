@@ -3,6 +3,8 @@
 
   // 负载测试相关
   let url = $state("http://httpbin.org/get");
+  let concurrency = $state(100); // 并发数，默认100
+  let duration = $state(10); // 测试时长，默认10秒
   let testResult = $state<any>(null);
   let isLoading = $state(false);
   
@@ -17,7 +19,9 @@
       // 调用后端负载测试命令，传递完整的配置对象
       testResult = await invoke("run_load_test", {
         config: {
-          url
+          url,
+          concurrency,
+          duration
         }
       });
     } catch (error) {
@@ -33,16 +37,39 @@
   <h1>高性能负载测试工具</h1>
 
   <!-- 负载测试部分 -->
-  <form class="row" onsubmit={runLoadTest}>
-    <input 
-      id="load-test-url" 
-      placeholder="Enter URL to test..." 
-      bind:value={url} 
-      style="margin-right: 5px; flex: 1;" 
-    />
-    <button type="submit" disabled={isLoading}>
-      {isLoading ? "测试中..." : "执行负载测试"}
-    </button>
+  <form class="load-test-form" onsubmit={runLoadTest}>
+    <div class="row">
+      <input 
+        id="load-test-url" 
+        placeholder="Enter URL to test..." 
+        bind:value={url} 
+        style="margin-right: 5px; flex: 1;" 
+      />
+    </div>
+    
+    <div class="row" style="margin-top: 10px; align-items: center;">
+      <label for="concurrency" style="margin-right: 5px; font-weight: bold;">并发数:</label>
+      <input 
+        id="concurrency"
+        type="number" 
+        placeholder="100" 
+        bind:value={concurrency} 
+        style="margin-right: 15px; width: 120px;" 
+        min="1" 
+      />
+      <label for="duration" style="margin-right: 5px; font-weight: bold;">测试时长 (秒):</label>
+      <input 
+        id="duration"
+        type="number" 
+        placeholder="10" 
+        bind:value={duration} 
+        style="margin-right: 15px; width: 120px;" 
+        min="1" 
+      />
+      <button type="submit" disabled={isLoading}>
+        {isLoading ? "测试中..." : "执行负载测试"}
+      </button>
+    </div>
   </form>
   
   {#if testResult}
