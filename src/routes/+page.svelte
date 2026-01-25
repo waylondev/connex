@@ -2,9 +2,11 @@
   import { invoke } from "@tauri-apps/api/core";
 
   // 负载测试相关
-  let url = $state("https://api.example.com");
+  let url = $state("http://httpbin.org/get");
   let testResult = $state<any>(null);
   let isLoading = $state(false);
+  
+
   
   async function runLoadTest(event: Event) {
     event.preventDefault();
@@ -66,7 +68,7 @@
             <strong>每秒请求数:</strong> {testResult.requests_per_second.toFixed(2)}
           </div>
           <div class="result-item">
-            <strong>平均延迟:</strong> {(testResult.average_latency.as_millis() || 0)}ms
+            <strong>平均延迟:</strong> {testResult.average_latency}ms
           </div>
         </div>
         
