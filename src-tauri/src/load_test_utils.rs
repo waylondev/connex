@@ -25,8 +25,9 @@ pub fn print_test_result(result: &LoadTestResult) {
 /// 创建优化的HTTP客户端 - 支持高并发
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // 调整连接池大小，由操作系统限制
-        .pool_max_idle_per_host(usize::MAX)
+        // 优化连接池设置，避免过度占用资源
+        .pool_max_idle_per_host(1000)  // 限制最大空闲连接数
+        .pool_idle_timeout(Some(Duration::from_secs(30)))  // 空闲连接超时
         // 调整超时设置，适合高并发场景
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
