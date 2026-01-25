@@ -5,8 +5,18 @@
   let url = $state("http://httpbin.org/get");
   let concurrency = $state(100); // 并发数，默认100
   let duration = $state(10); // 测试时长，默认10秒
+  let enableMonitoring = $state(true); // 是否启用监控
   let testResult = $state<any>(null);
   let isLoading = $state(false);
+  let realTimeMetrics = $state<any>(null);
+  
+  // 监听Tauri事件
+  import { listen } from '@tauri-apps/api/event';
+  
+  // 初始化时监听监控事件
+  listen('load_test_metrics', (event) => {
+    realTimeMetrics = event.payload;
+  });
   
 
   
@@ -14,16 +24,28 @@
     event.preventDefault();
     isLoading = true;
     testResult = null;
+    realTimeMetrics = null;
     
     try {
-      // 调用后端负载测试命令，传递完整的配置对象
-      testResult = await invoke("run_load_test", {
-        config: {
-          url,
-          concurrency,
-          duration
-        }
-      });
+      if (enableMonitoring) {
+        // 调用带监控的负载测试命令
+        testResult = await invoke("run_load_test_with_monitoring", {
+          config: {
+            url,
+            concurrency,
+            duration
+          }
+        });
+      } else {
+        // 调用原始负载测试命令
+        testResult = await invoke("run_load_test", {
+          config: {
+            url,
+            concurrency,
+            duration
+          }
+        });
+      }
     } catch (error) {
       console.error("负载测试失败:", error);
       testResult = { error: String(error) };
@@ -66,11 +88,63 @@
         style="margin-right: 15px; width: 120px;" 
         min="1" 
       />
+      <label for="monitoring" style="margin-right: 5px; font-weight: bold;">启用监控:</label>
+      <input 
+        id="monitoring"
+        type="checkbox" 
+        bind:checked={enableMonitoring} 
+        style="margin-right: 15px;" 
+      />
       <button type="submit" disabled={isLoading}>
         {isLoading ? "测试中..." : "执行负载测试"}
       </button>
     </div>
   </form>
+  
+  <!-- 实时监控数据 -->
+  {#if realTimeMetrics && enableMonitoring}
+    <div class="real-time-metrics">
+      <h3>实时监控数据</h3>
+      <div class="metrics-grid">
+        <div class="metric-item">
+          <strong>RPS:</strong> {realTimeMetrics.rps.toFixed(2)}
+        </div>
+        <div class="metric-item">
+          <strong>总请求数:</strong> {realTimeMetrics.total_requests}
+        </div>
+        <div class="metric-item">
+          <strong>成功请求:</strong> {realTimeMetrics.successful_requests}
+        </div>
+        <div class="metric-item">
+          <strong>失败请求:</strong> {realTimeMetrics.failed_requests}
+        </div>
+        <div class="metric-item">
+          <strong>平均延迟:</strong> {realTimeMetrics.average_latency}ms
+        </div>
+        <div class="metric-item">
+          <strong>P50延迟:</strong> {realTimeMetrics.latency_percentiles.p50}ms
+        </div>
+        <div class="metric-item">
+          <strong>P90延迟:</strong> {realTimeMetrics.latency_percentiles.p90}ms
+        </div>
+        <div class="metric-item">
+          <strong>P95延迟:</strong> {realTimeMetrics.latency_percentiles.p95}ms
+        </div>
+        <div class="metric-item">
+          <strong>P99延迟:</strong> {realTimeMetrics.latency_percentiles.p99}ms
+        </div>
+        <div class="metric-item">
+          <strong>CPU使用率:</strong> {realTimeMetrics.system_metrics.cpu_usage.toFixed(1)}%
+        </div>
+        <div class="metric-item">
+          <strong>内存使用率:</strong> {realTimeMetrics.system_metrics.memory_usage.toFixed(1)}%
+        </div>
+        <div class="metric-item">
+          <strong>网络IO:</strong> {realTimeMetrics.system_metrics.network_io} bytes/s
+        </div>
+      </div>
+    </div>
+  {/if}
   
   {#if testResult}
     {#if testResult.error}
@@ -225,6 +299,30 @@ button {
   padding: 0.8em;
   background-color: rgba(255, 255, 255, 0.8);
   border-radius: 6px;
+}
+
+/* 实时监控数据样式 */
+.real-time-metrics {
+  margin-top: 1.5em;
+  padding: 1.5em;
+  border-radius: 8px;
+  text-align: left;
+  background-color: #e8f5e8;
+  border: 1px solid #c8e6c9;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.8em;
+  margin: 1em 0;
+}
+
+.metric-item {
+  padding: 0.6em;
+  background-color: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  border-left: 4px solid #4caf50;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -22,17 +22,6 @@ pub fn print_test_result(result: &LoadTestResult) {
     println!("错误统计: {:?}", result.error_stats);
 }
 
-/// 打印监控数据的辅助方法 - 负载测试特有
-pub fn print_monitoring_data(metrics: &crate::monitoring::RealTimeMetrics) {
-    println!("\n监控数据:");
-    println!("每秒请求数: {:.2} RPS", metrics.rps);
-    println!("延迟分布:");
-    println!("  P50: {}ms", metrics.latency_percentiles.p50);
-    println!("  P90: {}ms", metrics.latency_percentiles.p90);
-    println!("  P95: {}ms", metrics.latency_percentiles.p95);
-    println!("  P99: {}ms", metrics.latency_percentiles.p99);
-}
-
 /// 创建优化的HTTP客户端 - 支持高并发
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
