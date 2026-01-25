@@ -1,9 +1,9 @@
 [package]
 name = "connex"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-edition = "2021"
+description = "A high-performance load testing tool"
+authors = ["waylon"]
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,3 +23,15 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# HTTP客户端
+reqwest = { version = "0.11", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# 高性能统计
+hdrhistogram = "7.0"
+
+# 实用工具
+anyhow = "1.0"
+tracing = "0.1"
+chrono = "0.4"
