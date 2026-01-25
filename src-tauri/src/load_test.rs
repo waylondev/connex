@@ -62,7 +62,7 @@ struct TestStatistics {
 }
 
 impl TestStatistics {
-    /// 批量更新统计数据，减少原子操作开销
+    /// 批量更新统计数据
     fn update_statistics(
         &self,
         local_successful: &mut u32,
@@ -73,7 +73,6 @@ impl TestStatistics {
         local_http_errors: &mut u32,
         local_other_errors: &mut u32,
     ) {
-        // 批量更新原子变量，减少CPU cache失效
         self.successful.fetch_add(*local_successful, Ordering::Relaxed);
         self.failed.fetch_add(*local_failed, Ordering::Relaxed);
         self.total_latency.fetch_add(*local_latency, Ordering::Relaxed);
@@ -82,7 +81,6 @@ impl TestStatistics {
         self.http_errors.fetch_add(*local_http_errors, Ordering::Relaxed);
         self.other_errors.fetch_add(*local_other_errors, Ordering::Relaxed);
         
-        // 重置本地计数器
         *local_successful = 0;
         *local_failed = 0;
         *local_latency = 0;
@@ -99,32 +97,33 @@ struct TestState {
     stats: Arc<TestStatistics>,
 }
 
-/// 辅助函数：初始化测试状态
-fn initialize_test_state(config: &Config) -> (Arc<TestState>, std::time::Instant, std::time::Instant) {
-    // 使用优化的HTTP客户端，支持高并发
+/// 类型别名：简化复杂类型
+pub type TaskHandle = tokio::task::JoinHandle<()>;
+pub type TaskList = Vec<TaskHandle>;
+
+/// 初始化测试配置
+fn initialize_config(config: &Config) -> Arc<TestConfig> {
     let client = Arc::new(load_test_utils::create_http_client());
     let url = Arc::new(config.url.clone());
     
-    // 配置类状态
-    let test_config = Arc::new(TestConfig {
+    Arc::new(TestConfig {
         client,
         url,
-    });
-    
-    // 使用Arc包装原子变量
+    })
+}
+
+/// 初始化测试统计
+fn initialize_statistics() -> Arc<TestStatistics> {
     let successful = Arc::new(AtomicU32::new(0));
     let failed = Arc::new(AtomicU32::new(0));
-    // 使用AtomicU64存储总延迟（毫秒），避免Mutex竞争
     let total_latency = Arc::new(AtomicU64::new(0));
     
-    // 错误类型统计
     let connection_errors = Arc::new(AtomicU32::new(0));
     let timeout_errors = Arc::new(AtomicU32::new(0));
     let http_errors = Arc::new(AtomicU32::new(0));
     let other_errors = Arc::new(AtomicU32::new(0));
     
-    // 统计类状态
-    let test_stats = Arc::new(TestStatistics {
+    Arc::new(TestStatistics {
         successful,
         failed,
         total_latency,
@@ -132,12 +131,17 @@ fn initialize_test_state(config: &Config) -> (Arc<TestState>, std::time::Instant
         timeout_errors,
         http_errors,
         other_errors,
-    });
+    })
+}
+
+/// 辅助函数：初始化测试状态
+fn initialize_test_state(config: &Config) -> (Arc<TestState>, std::time::Instant, std::time::Instant) {
+    let test_config = initialize_config(config);
+    let stats = initialize_statistics();
     
-    // 组合状态
     let test_state = Arc::new(TestState {
         config: test_config,
-        stats: test_stats,
+        stats,
     });
     
     let start_time = std::time::Instant::now();
@@ -151,16 +155,14 @@ fn spawn_test_tasks(
     test_state: &Arc<TestState>,
     end_time: std::time::Instant,
     concurrency: usize
-) -> Vec<tokio::task::JoinHandle<()>> {
+) -> TaskList {
     let mut tasks = Vec::with_capacity(concurrency);
     
     for _ in 0..concurrency {
         let state = Arc::clone(test_state);
         let end_time = end_time;
         
-        // 直接spawn task，每个task持续发送请求直到测试结束
         let task = tokio::spawn(async move {
-            // 批量更新统计数据，减少原子操作开销
             let mut local_successful = 0;
             let mut local_failed = 0;
             let mut local_latency = 0u64;
@@ -169,17 +171,13 @@ fn spawn_test_tasks(
             let mut local_http_errors = 0;
             let mut local_other_errors = 0;
             
-            // 使用时间检查任务是否需要退出
             while std::time::Instant::now() < end_time {
-                // 发送单个请求
                 let request_start = std::time::Instant::now();
                 
                 match state.config.client.get(state.config.url.as_str()).send().await {
                     Ok(response) => {
-                        // 检查HTTP状态码
                         if response.status().is_success() {
                             local_successful += 1;
-                            // 计算延迟并更新本地变量（毫秒）
                             let latency = request_start.elapsed().as_millis() as u64;
                             local_latency += latency;
                         } else {
@@ -190,7 +188,6 @@ fn spawn_test_tasks(
                     Err(e) => {
                         local_failed += 1;
                         
-                        // 分类统计错误类型
                         if e.is_connect() {
                             local_connection_errors += 1;
                         } else if e.is_timeout() {
@@ -201,9 +198,7 @@ fn spawn_test_tasks(
                     }
                 }
                 
-                // 每100个请求批量更新一次原子变量，减少原子操作开销
                 if local_successful + local_failed >= 100 {
-                    // 调用辅助方法批量更新统计数据
                     state.stats.update_statistics(
                         &mut local_successful,
                         &mut local_failed,
@@ -216,9 +211,7 @@ fn spawn_test_tasks(
                 }
             }
             
-            // 测试结束时，更新剩余的统计数据
             if local_successful + local_failed > 0 {
-                // 调用辅助方法批量更新统计数据
                 state.stats.update_statistics(
                     &mut local_successful,
                     &mut local_failed,
@@ -238,7 +231,7 @@ fn spawn_test_tasks(
 }
 
 /// 辅助函数：等待任务完成
-async fn wait_for_tasks(tasks: Vec<tokio::task::JoinHandle<()>>) {
+async fn wait_for_tasks(tasks: TaskList) {
     for task in tasks {
         task.await.unwrap();
     }
@@ -288,9 +281,9 @@ mod tests {
     #[tokio::test]
     async fn test_load_test_simple() {
         let config = Config {
-            url: "http://httpbin.org/get".to_string(),
-            concurrency: 10,
-            duration: Duration::from_secs(2),
+            url: "http://localhost:3000".to_string(),
+            concurrency: 10000,
+            duration: Duration::from_secs(10),
         };
         
         let result = run(config).await;
