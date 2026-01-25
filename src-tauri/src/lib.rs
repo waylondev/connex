@@ -13,6 +13,9 @@ mod load_test_utils;
 // 负载测试核心模块
 mod load_test;
 
+// 监控模块
+mod monitoring;
+
 /// 执行负载测试
 #[tauri::command]
 async fn run_load_test(config: load_test::Config) -> load_test::LoadTestResult {

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 // 导入模块：负载测试特有方法
 use crate::load_test_utils;
+use crate::monitoring::Monitor;
 
 /// 负载测试配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +101,7 @@ impl TestStatistics {
 struct TestState {
     config: Arc<TestConfig>,
     stats: Arc<TestStatistics>,
+    monitor: Arc<Monitor>,
 }
 
 /// 类型别名：简化复杂类型
@@ -143,10 +145,12 @@ fn initialize_statistics() -> Arc<TestStatistics> {
 fn initialize_test_state(config: &Config) -> (Arc<TestState>, std::time::Instant, std::time::Instant) {
     let test_config = initialize_config(config);
     let stats = initialize_statistics();
+    let monitor = Arc::new(Monitor::new());
     
     let test_state = Arc::new(TestState {
         config: test_config,
         stats,
+        monitor,
     });
     
     let start_time = std::time::Instant::now();
@@ -181,17 +185,21 @@ fn spawn_test_tasks(
                 
                 match state.config.client.get(state.config.url.as_str()).send().await {
                     Ok(response) => {
+                        let latency = request_start.elapsed();
                         if response.status().is_success() {
                             local_successful += 1;
-                            let latency = request_start.elapsed().as_millis() as u64;
-                            local_latency += latency;
+                            let latency_ms = latency.as_millis() as u64;
+                            local_latency += latency_ms;
+                            state.monitor.record_success(latency);
                         } else {
                             local_failed += 1;
                             local_http_errors += 1;
+                            state.monitor.record_failure();
                         }
                     }
                     Err(e) => {
                         local_failed += 1;
+                        state.monitor.record_failure();
                         
                         if e.is_connect() {
                             local_connection_errors += 1;
@@ -255,6 +263,10 @@ fn generate_test_result(
     // 调用辅助方法打印测试结果
     load_test_utils::print_test_result(&result);
     
+    // 收集并打印监控数据
+    let metrics = test_state.monitor.collect_metrics();
+    load_test_utils::print_monitoring_data(&metrics);
+    
     result
 }
 
@@ -279,7 +291,6 @@ pub async fn run(config: Config) -> LoadTestResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     /// 简单测试：低并发，短时间，快速运行
     /// 用于开发调试，CI/CD自动运行
