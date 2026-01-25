@@ -1,127 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use futures::stream::{self, StreamExt};
+use futures::stream::StreamExt;
+use reqwest;
 
-// 辅助方法模块
-mod utils {
-    use super::*;
-    
-    /// 打印测试结果的辅助方法
-    pub fn print_test_result(result: &LoadTestResult) {
-        println!("测试结果:");
-        println!("总请求数: {}", result.total_requests);
-        println!("成功请求数: {}", result.successful_requests);
-        println!("失败请求数: {}", result.failed_requests);
-        println!("每秒请求数: {:.2}", result.requests_per_second);
-        println!("平均延迟: {}ms", result.average_latency);
-        println!("错误统计: {:?}", result.error_stats);
-    }
-    
-    /// 创建基于时间的请求流 - 持续生成任务直到测试时间结束
-    pub fn create_request_stream(end_time: std::time::Instant) -> impl futures::Stream<Item = usize> {
-        let count = 0;
-        
-        // 使用unfold创建异步流，而不是使用sync迭代器包装，避免卡死
-        stream::unfold((count, end_time), |(mut count, end_time)| async move {
-            // 检查是否超过测试时间
-            if std::time::Instant::now() >= end_time {
-                return None;
-            }
-            
-            // 增加计数并返回
-            count += 1;
-            Some((count, (count, end_time)))
-        })
-    }
-    
-    /// 请求处理策略 - 统一使用批量处理，支持单条和批量
-    pub async fn process_requests(
-        client: Arc<reqwest::Client>,
-        url: Arc<String>,
-        successful: Arc<std::sync::atomic::AtomicU32>,
-        failed: Arc<std::sync::atomic::AtomicU32>,
-        total_latency: Arc<std::sync::Mutex<Duration>>,
-        connection_errors: Arc<std::sync::atomic::AtomicU32>,
-        timeout_errors: Arc<std::sync::atomic::AtomicU32>,
-        http_errors: Arc<std::sync::atomic::AtomicU32>,
-        other_errors: Arc<std::sync::atomic::AtomicU32>,
-        end_time: std::time::Instant,
-        batch_size: usize, // 批量大小，1表示单条处理
-    ) {
-        // 检查是否超过测试时间
-        if std::time::Instant::now() >= end_time {
-            return;
-        }
-        
-        // 统一使用批量处理逻辑，batch_size=1就是单条处理
-        let request_start = std::time::Instant::now();
-        
-        // 创建批量请求
-        let futures: Vec<_> = (0..batch_size)
-            .map(|_| client.get(url.as_str()).send())
-            .collect();
-        
-        // 批量等待所有请求完成
-        let results = futures::future::join_all(futures).await;
-        
-        // 处理批量结果
-        for result in results {
-            match result {
-                Ok(response) => {
-                    // 检查HTTP状态码
-                    if response.status().is_success() {
-                        successful.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let latency = request_start.elapsed();
-                        let mut guard = total_latency.lock().unwrap();
-                        *guard += latency;
-                    } else {
-                        failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        http_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-                Err(e) => {
-                    failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    
-                    // 分类统计错误类型
-                    if e.is_connect() {
-                        connection_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else if e.is_timeout() {
-                        timeout_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    } else {
-                        other_errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-            }
-        }
-    }
-    
-    /// 默认并发数
-    pub fn default_concurrency() -> usize {
-        10
-    }
-    
-    /// 默认测试时长
-    pub fn default_duration() -> Duration {
-        Duration::from_secs(10)
-    }
-    
-    /// 默认批量大小
-    pub fn default_batch_size() -> usize {
-        1
-    }
-}
+// 导入模块：公共方法
+use crate::utils;
+// 导入模块：负载测试特有方法
+use crate::load_test_utils;
 
 /// 负载测试配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub url: String,
-    #[serde(default = "utils::default_concurrency")]
+    #[serde(default = "load_test_utils::default_concurrency")]
     pub concurrency: usize, // 默认10
-    #[serde(default = "utils::default_duration")]
+    #[serde(default = "load_test_utils::default_duration")]
     pub duration: Duration, // 默认10秒
-    #[serde(default = "utils::default_batch_size")]
-    pub batch_size: usize, // 默认1
 }
 
 
@@ -150,28 +45,13 @@ pub struct LoadTestResult {
 
 // 直接使用serde默认值，不需要单独的配置处理函数
 
-/// 打印测试结果的辅助方法
-fn print_test_result(result: &LoadTestResult) {
-    println!("测试结果:");
-    println!("总请求数: {}", result.total_requests);
-    println!("成功请求数: {}", result.successful_requests);
-    println!("失败请求数: {}", result.failed_requests);
-    println!("每秒请求数: {:.2}", result.requests_per_second);
-    println!("平均延迟: {}ms", result.average_latency);
-    println!("错误统计: {:?}", result.error_stats);
-}
-
 /// 执行负载测试 - 使用流式处理+buffer_unordered实现真正的高并发
 pub async fn run(config: Config) -> LoadTestResult {
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::AtomicU32;
     use std::sync::Mutex;
     
     // 打印负载测试参数
-    println!("开始负载测试:");
-    println!("URL: {}", config.url);
-    println!("并发数: {}", config.concurrency);
-    println!("测试时长: {:?}", config.duration);
-    println!("批量大小: {}", config.batch_size);
+    load_test_utils::print_test_config(&config);
     
     let client = Arc::new(reqwest::Client::new());
     let url = Arc::new(config.url.clone());
@@ -195,6 +75,8 @@ pub async fn run(config: Config) -> LoadTestResult {
     
     let _results: Vec<()> = request_stream
         .map(|_| {
+            // 必须克隆Arc引用，因为每个异步任务需要拥有自己的引用
+            // Arc::clone()是轻量级操作，仅增加引用计数
             let client = Arc::clone(&client);
             let url = Arc::clone(&url);
             let successful = Arc::clone(&successful);
@@ -204,54 +86,27 @@ pub async fn run(config: Config) -> LoadTestResult {
             let timeout_errors = Arc::clone(&timeout_errors);
             let http_errors = Arc::clone(&http_errors);
             let other_errors = Arc::clone(&other_errors);
-            let end_time = end_time;
             
             async move {
-                utils::process_requests(
+                // 调用load_test_utils模块的process_single_request函数处理单个请求
+                load_test_utils::process_single_request(
                     client, url, successful, failed, total_latency,
-                    connection_errors, timeout_errors, http_errors, other_errors,
-                    end_time, config.batch_size
-                ).await
+                    connection_errors, timeout_errors, http_errors, other_errors
+                ).await;
             }
         })
-        .buffer_unordered(config.concurrency) // 关键：控制并发度，实现自动背压
+        .buffer_unordered(config.concurrency) // 直接控制HTTP请求并发度
         .collect()
         .await;
     
-    let elapsed = start_time.elapsed();
-    let total_successful = successful.load(Ordering::Relaxed);
-    let total_failed = failed.load(Ordering::Relaxed);
-    let total_requests = total_successful + total_failed;
-    
-    let avg_latency = if total_successful > 0 {
-        // 将Duration转换为毫秒
-        (*total_latency.lock().unwrap() / total_successful).as_millis() as u64
-    } else {
-        0
-    };
-    
-    let rps = total_requests as f64 / elapsed.as_secs_f64();
-    
-    // 收集错误统计
-    let error_stats = ErrorStats {
-        connection_errors: connection_errors.load(Ordering::Relaxed),
-        timeout_errors: timeout_errors.load(Ordering::Relaxed),
-        http_errors: http_errors.load(Ordering::Relaxed),
-        other_errors: other_errors.load(Ordering::Relaxed),
-    };
-    
-    // 创建测试结果
-    let result = LoadTestResult {
-        total_requests,
-        successful_requests: total_successful,
-        failed_requests: total_failed,
-        requests_per_second: rps,
-        average_latency: avg_latency,
-        error_stats,
-    };
+    // 生成测试结果
+    let result = load_test_utils::generate_test_result(
+        start_time, &successful, &failed, &total_latency,
+        &connection_errors, &timeout_errors, &http_errors, &other_errors
+    );
     
     // 调用辅助方法打印测试结果
-    print_test_result(&result);
+    load_test_utils::print_test_result(&result);
     
     result
 }
@@ -265,15 +120,13 @@ mod tests {
     async fn test_load_test() {
         let config = Config {
             url: "http://httpbin.org/get".to_string(),
-            concurrency: 10,
+            concurrency: 100,
             duration: Duration::from_secs(10),
-            batch_size: 1,
         };
         
         let result = run(config).await;
         
         assert!(result.total_requests > 0);
         assert!(result.requests_per_second > 0.0);
-        println!("测试结果: {:?}", result);
     }
 }

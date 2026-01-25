@@ -4,6 +4,13 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// 公共工具模块
+mod utils;
+
+// 负载测试特有工具模块
+mod load_test_utils;
+
+// 负载测试核心模块
 mod load_test;
 
 /// 执行负载测试
