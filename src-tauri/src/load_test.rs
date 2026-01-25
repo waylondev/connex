@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use futures::stream::StreamExt;
-use reqwest;
 
 // 导入模块：公共方法
 use crate::utils;
@@ -53,7 +52,8 @@ pub async fn run(config: Config) -> LoadTestResult {
     // 打印负载测试参数
     load_test_utils::print_test_config(&config);
     
-    let client = Arc::new(reqwest::Client::new());
+    // 使用优化的HTTP客户端，支持高并发
+    let client = Arc::new(load_test_utils::create_http_client());
     let url = Arc::new(config.url.clone());
     
     // 使用Arc包装原子变量
@@ -73,6 +73,7 @@ pub async fn run(config: Config) -> LoadTestResult {
     // 使用流式处理实现真正的高并发
     let request_stream = utils::create_request_stream(end_time);
     
+    // 并发处理请求，依赖request_stream内部的时间检查
     let _results: Vec<()> = request_stream
         .map(|_| {
             // 必须克隆Arc引用，因为每个异步任务需要拥有自己的引用
@@ -120,7 +121,7 @@ mod tests {
     async fn test_load_test() {
         let config = Config {
             url: "http://httpbin.org/get".to_string(),
-            concurrency: 100,
+            concurrency: 500,
             duration: Duration::from_secs(10),
         };
         

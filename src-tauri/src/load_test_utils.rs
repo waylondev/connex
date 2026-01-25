@@ -22,6 +22,18 @@ pub fn print_test_result(result: &LoadTestResult) {
     println!("错误统计: {:?}", result.error_stats);
 }
 
+/// 创建优化的HTTP客户端 - 支持高并发
+pub fn create_http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        // 增加每个主机的最大空闲连接数
+        .pool_max_idle_per_host(500)
+        // 调整超时设置，适合长连接
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .expect("Failed to create HTTP client")
+}
+
 /// 处理单个HTTP请求的辅助方法 - 负载测试特有
 pub async fn process_single_request(
     client: Arc<reqwest::Client>,
