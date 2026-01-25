@@ -1,12 +1,19 @@
 <script lang="ts">
-  export let url = "http://httpbin.org/get";
-  export let concurrency = 100;
-  export let duration = 10;
-  export let enableMonitoring = true;
-  export let isLoading = false;
+  // 使用响应式绑定，确保双向数据流
+  export let url: string;
+  export let concurrency: number;
+  export let duration: number;
+  export let enableMonitoring: boolean;
+  export let isLoading: boolean;
   
   // 事件定义
   export let onRunTest: (event: Event) => void;
+  
+  // 确保数据变化时通知父组件
+  $: {
+    // 当这些值变化时，确保父组件能感知到
+    url, concurrency, duration, enableMonitoring;
+  }
 </script>
 
 <!-- 负载测试配置表单 -->

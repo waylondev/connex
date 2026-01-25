@@ -8,8 +8,8 @@
   import TestResults from '$lib/components/TestResults.svelte';
 
   // 负载测试状态
-  let url = $state("http://httpbin.org/get");
-  let concurrency = $state(100);
+  let url = $state("http://localhost:3000");
+  let concurrency = $state(1000);
   let duration = $state(10);
   let enableMonitoring = $state(true);
   let testResult = $state<any>(null);
@@ -47,6 +47,14 @@
     cpuHistory = [];
     memoryHistory = [];
     
+    // 调试：打印实际传递的参数
+    console.log('前端传递的参数:', {
+      url,
+      concurrency,
+      duration,
+      enableMonitoring
+    });
+    
     try {
       const config = {
         url,
@@ -75,7 +83,11 @@
 
   <!-- 负载测试配置 -->
   <LoadTestConfig 
-    {url} {concurrency} {duration} {enableMonitoring} {isLoading}
+    bind:url
+    bind:concurrency
+    bind:duration
+    bind:enableMonitoring
+    {isLoading}
     onRunTest={runLoadTest}
   />
   
