@@ -148,8 +148,8 @@ mod tests {
     #[tokio::test]
     async fn test_load_test() {
         let config = Config {
-            url: "http://httpbin.org/get".to_string(),
-            concurrency: 1000,
+            url: "http://localhost:3000".to_string(),
+            concurrency: 1000000,
             duration: Duration::from_secs(10),
         };
         

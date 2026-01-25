@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, atomic::{AtomicU32, AtomicU64, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU32, AtomicU64}};
 use std::time::Duration;
 use reqwest;
 use crate::load_test::{Config, LoadTestResult};
