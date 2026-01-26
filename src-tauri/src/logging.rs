@@ -1,4 +1,3 @@
-use tracing_subscriber::EnvFilter;
 
 /// 开发环境日志配置
 pub fn init_dev() -> Result<(), Box<dyn std::error::Error>> {
