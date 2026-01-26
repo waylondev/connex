@@ -1,8 +1,9 @@
 
 /// 开发环境日志配置
 pub fn init_dev() -> Result<(), Box<dyn std::error::Error>> {
+    // 开发环境使用INFO级别，避免DEBUG噪音
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .pretty()
         .init();
     Ok(())
