@@ -25,12 +25,12 @@ pub fn print_test_result(result: &LoadTestResult) {
 /// 创建优化的HTTP客户端 - 支持高并发
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // 优化连接池设置
-        .pool_max_idle_per_host(200)  // 合理限制空闲连接
-        .pool_idle_timeout(Some(std::time::Duration::from_secs(15)))  // 缩短空闲超时
-        // 调整超时设置
-        .connect_timeout(std::time::Duration::from_secs(3))
-        .timeout(std::time::Duration::from_secs(8))
+        // 优化连接池设置 - 针对高并发优化
+        .pool_max_idle_per_host(500)  // 增加空闲连接数支持更高并发
+        .pool_idle_timeout(Some(std::time::Duration::from_secs(10)))  // 进一步缩短空闲超时
+        // 调整超时设置 - 更激进的优化
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(5))
         // 启用TCP_NODELAY，减少延迟
         .tcp_nodelay(true)
         // 启用HTTP/1.1标题大小写转换
@@ -41,6 +41,8 @@ pub fn create_http_client() -> reqwest::Client {
         .no_gzip()
         .no_brotli()
         .no_deflate()
+        // 启用连接复用
+        .http1_only()  // 强制使用HTTP/1.1，避免HTTP/2协商开销
         .build()
         .expect("Failed to create HTTP client")
 }
@@ -50,6 +52,18 @@ pub fn create_http_client() -> reqwest::Client {
 /// 默认并发数 - 负载测试特有
 pub fn default_concurrency() -> usize {
     10
+}
+
+/// 性能监控 - 计算QPS和平均延迟
+pub fn calculate_performance_metrics(total_requests: u32, duration_secs: f64, total_latency_ms: u64) -> (f64, f64) {
+    let qps = total_requests as f64 / duration_secs;
+    let avg_latency = if total_requests > 0 {
+        total_latency_ms as f64 / total_requests as f64
+    } else {
+        0.0
+    };
+    
+    (qps, avg_latency)
 }
 
 

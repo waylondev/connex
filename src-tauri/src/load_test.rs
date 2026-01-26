@@ -193,21 +193,18 @@ fn spawn_test_tasks(
                     Err(e) => {
                         local_failed += 1;
                         
-                        // 更精确的错误分类
-                        if e.is_connect() || e.is_request() {
-                            local_connection_errors += 1;
-                        } else if e.is_timeout() {
-                            local_timeout_errors += 1;
-                        } else if e.is_status() {
-                            local_http_errors += 1;
-                        } else {
-                            local_other_errors += 1;
+                        // 优化的错误分类 - 使用match提高性能
+                        match e {
+                            e if e.is_connect() || e.is_request() => local_connection_errors += 1,
+                            e if e.is_timeout() => local_timeout_errors += 1,
+                            e if e.is_status() => local_http_errors += 1,
+                            _ => local_other_errors += 1,
                         }
                     }
                 }
                 
-                // 每50个请求批量更新统计，减少原子操作开销
-                if local_successful + local_failed >= 50 {
+                // 每100个请求批量更新统计，进一步减少原子操作开销
+                if local_successful + local_failed >= 100 {
                     state.stats.update_statistics(
                         &mut local_successful,
                         &mut local_failed,
