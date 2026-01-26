@@ -68,7 +68,7 @@ impl LoadTestMonitor {
         
         let monitoring_task = if let Some(app_handle) = app_handle_clone {
             Some(tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_millis(500));
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
                 while std::time::Instant::now() < end_time {
                     interval.tick().await;
                     let metrics = monitor_clone.collect_metrics();
@@ -89,17 +89,15 @@ impl LoadTestMonitor {
 
         // 打印监控数据
         let metrics = self.monitor.collect_metrics();
-        println!("\n=== 监控数据 ===");
-        println!("每秒请求数: {:.2} RPS", metrics.rps);
-        println!("延迟分布:");
-        println!("  P50: {}ms", metrics.latency_percentiles.p50);
-        println!("  P90: {}ms", metrics.latency_percentiles.p90);
-        println!("  P95: {}ms", metrics.latency_percentiles.p95);
-        println!("  P99: {}ms", metrics.latency_percentiles.p99);
-        println!("系统资源:");
-        println!("  CPU使用率: {:.1}%", metrics.system_metrics.cpu_usage);
-        println!("  内存使用率: {:.1}%", metrics.system_metrics.memory_usage);
-        println!("  网络IO: {} bytes/s", metrics.system_metrics.network_io);
+        // 使用tracing输出性能关键指标
+        tracing::info!(
+            "监控指标: RPS={:.2}, P50={}ms, P95={}ms, CPU={:.1}%, Mem={:.1}%",
+            metrics.rps,
+            metrics.latency_percentiles.p50,
+            metrics.latency_percentiles.p95,
+            metrics.system_metrics.cpu_usage,
+            metrics.system_metrics.memory_usage
+        );
 
         result
     }
