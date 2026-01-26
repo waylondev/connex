@@ -1,18 +1,4 @@
-use tracing_subscriber::{fmt, EnvFilter};
-
-/// 统一的日志初始化方法
-pub fn init() -> Result<(), Box<dyn std::error::Error>> {
-    // 从环境变量读取日志级别，默认info
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-        
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .compact()
-        .init();
-        
-    Ok(())
-}
+use tracing_subscriber::EnvFilter;
 
 /// 开发环境日志配置
 pub fn init_dev() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,4 +25,26 @@ pub fn init_test() -> Result<(), Box<dyn std::error::Error>> {
         .with_max_level(tracing::Level::WARN)
         .try_init();
     Ok(())
+}
+
+/// 智能日志配置 - 根据环境变量自动选择最佳配置
+pub fn init_smart() -> Result<(), Box<dyn std::error::Error>> {
+    // 优先使用用户指定的环境变量
+    if let Ok(log_type) = std::env::var("CONNEX_LOG_TYPE") {
+        match log_type.as_str() {
+            "dev" => return init_dev(),
+            "prod" => return init_prod(),
+            "test" => return init_test(),
+            _ => {} // 使用默认配置
+        }
+    }
+    
+    // 如果没有指定，根据构建模式智能选择
+    if cfg!(debug_assertions) {
+        // 调试模式：使用开发环境配置
+        init_dev()
+    } else {
+        // 发布模式：使用生产环境配置
+        init_prod()
+    }
 }

@@ -4,8 +4,8 @@
 mod logging;
 
 fn main() {
-    // 使用专门的日志模块初始化
-    if let Err(e) = logging::init() {
+    // 使用智能日志配置
+    if let Err(e) = logging::init_smart() {
         eprintln!("Failed to initialize logging: {}", e);
         return;
     }

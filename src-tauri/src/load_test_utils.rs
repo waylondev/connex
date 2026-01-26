@@ -1,6 +1,4 @@
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU64}};
-use std::time::Duration;
-use reqwest;
 use crate::load_test::{Config, LoadTestResult};
 
 /// 打印测试参数的辅助方法 - 负载测试特有
@@ -53,20 +51,6 @@ pub fn create_http_client() -> reqwest::Client {
 pub fn default_concurrency() -> usize {
     10
 }
-
-/// 性能监控 - 计算QPS和平均延迟
-pub fn calculate_performance_metrics(total_requests: u32, duration_secs: f64, total_latency_ms: u64) -> (f64, f64) {
-    let qps = total_requests as f64 / duration_secs;
-    let avg_latency = if total_requests > 0 {
-        total_latency_ms as f64 / total_requests as f64
-    } else {
-        0.0
-    };
-    
-    (qps, avg_latency)
-}
-
-
 
 /// 计算并生成测试结果 - 负载测试特有
 pub fn generate_test_result(
