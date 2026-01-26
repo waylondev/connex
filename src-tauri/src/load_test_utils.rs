@@ -25,17 +25,17 @@ pub fn print_test_result(result: &LoadTestResult) {
 /// 创建优化的HTTP客户端 - 支持高并发
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // 优化连接池设置，避免过度占用资源
-        .pool_max_idle_per_host(1000)  // 限制最大空闲连接数
-        .pool_idle_timeout(Some(Duration::from_secs(30)))  // 空闲连接超时
-        // 调整超时设置，适合高并发场景
-        .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(10))
+        // 优化连接池设置
+        .pool_max_idle_per_host(200)  // 合理限制空闲连接
+        .pool_idle_timeout(Some(std::time::Duration::from_secs(15)))  // 缩短空闲超时
+        // 调整超时设置
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .timeout(std::time::Duration::from_secs(8))
         // 启用TCP_NODELAY，减少延迟
         .tcp_nodelay(true)
         // 启用HTTP/1.1标题大小写转换
         .http1_title_case_headers()
-        // 禁用自动重定向，减少不必要的请求
+        // 禁用自动重定向
         .redirect(reqwest::redirect::Policy::none())
         // 禁用压缩，减少CPU开销
         .no_gzip()
