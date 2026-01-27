@@ -286,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_test_simple() {
         let config = Config {
-            url: "http://httpbin.org/get".to_string(),
+            url: "http://localhost:8080/bench".to_string(),
             concurrency: 10,
             duration: 2, // 直接使用整数秒数
         };

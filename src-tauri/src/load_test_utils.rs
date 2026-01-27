@@ -24,15 +24,17 @@ pub fn print_test_result(result: &LoadTestResult) {
 pub fn create_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         // 优化连接池设置 - 针对高并发优化
-        .pool_max_idle_per_host(500)  // 增加空闲连接数支持更高并发
-        .pool_idle_timeout(Some(std::time::Duration::from_secs(10)))  // 进一步缩短空闲超时
-        // 调整超时设置 - 更激进的优化
-        .connect_timeout(std::time::Duration::from_secs(2))
+        .pool_max_idle_per_host(1000)  // 大幅增加空闲连接数支持更高并发
+        .pool_idle_timeout(Some(std::time::Duration::from_secs(30)))  // 延长空闲超时
+        // 调整超时设置 - 更合理的优化
+        .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(5))
         // 启用TCP_NODELAY，减少延迟
         .tcp_nodelay(true)
-        // 启用HTTP/1.1标题大小写转换
+        // 启用HTTP/1.1标题大小写转换，兼容性更好
         .http1_title_case_headers()
+        // 允许HTTP/2协商，但不强制
+        .http2_adaptive_window(true)
         // 禁用自动重定向
         .redirect(reqwest::redirect::Policy::none())
         // 禁用压缩，减少CPU开销
@@ -40,7 +42,6 @@ pub fn create_http_client() -> reqwest::Client {
         .no_brotli()
         .no_deflate()
         // 启用连接复用
-        .http1_only()  // 强制使用HTTP/1.1，避免HTTP/2协商开销
         .build()
         .expect("Failed to create HTTP client")
 }
