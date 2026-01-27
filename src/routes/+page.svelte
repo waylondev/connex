@@ -1,59 +1,30 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { listen } from '@tauri-apps/api/event';
   
   // 导入组件
   import LoadTestConfig from '$lib/components/LoadTestConfig.svelte';
-  import RealTimeMetrics from '$lib/components/RealTimeMetrics.svelte';
   import TestResults from '$lib/components/TestResults.svelte';
 
   // 负载测试状态
   let url = $state("http://localhost:3000");
   let concurrency = $state(1000);
   let duration = $state(10);
-  let enableMonitoring = $state(true);
   let testResult = $state<any>(null);
   let isLoading = $state(false);
-  let realTimeMetrics = $state<any>(null);
-  
-  // 历史数据存储
-  let cpuHistory = $state<number[]>([]);
-  let memoryHistory = $state<number[]>([]);
-  const maxHistoryPoints = 50;
-  
-  // 初始化时监听监控事件
-  listen('load_test_metrics', (event) => {
-    realTimeMetrics = event.payload;
-    
-    // 更新历史数据
-    if (realTimeMetrics?.system_metrics) {
-      cpuHistory.push(realTimeMetrics.system_metrics.cpu_usage);
-      memoryHistory.push(realTimeMetrics.system_metrics.memory_usage);
-      
-      // 限制历史数据长度
-      if (cpuHistory.length > maxHistoryPoints) {
-        cpuHistory = cpuHistory.slice(-maxHistoryPoints);
-        memoryHistory = memoryHistory.slice(-maxHistoryPoints);
-      }
-    }
-  });
+
   
   // 执行负载测试
   async function runLoadTest(event: Event) {
     event.preventDefault();
     isLoading = true;
     testResult = null;
-    realTimeMetrics = null;
-    cpuHistory = [];
-    memoryHistory = [];
     
     // 调试：打印实际传递的参数
     console.log('前端传递的参数:', {
       url,
       concurrency,
-      duration,
-      enableMonitoring
-    });
+    duration
+  });
     
     try {
       const config = {
@@ -62,13 +33,8 @@
         duration
       };
       
-      if (enableMonitoring) {
-        // 调用带监控的负载测试命令
-        testResult = await invoke("run_load_test_with_monitoring", { config });
-      } else {
-        // 调用原始负载测试命令
-        testResult = await invoke("run_load_test", { config });
-      }
+      // 调用负载测试命令
+      testResult = await invoke("run_load_test", { config });
     } catch (error) {
       console.error("负载测试失败:", error);
       testResult = { error: String(error) };
@@ -86,19 +52,9 @@
     bind:url
     bind:concurrency
     bind:duration
-    bind:enableMonitoring
     {isLoading}
     onRunTest={runLoadTest}
   />
-  
-  <!-- 实时监控数据 -->
-  {#if enableMonitoring}
-    <RealTimeMetrics 
-      {realTimeMetrics}
-      {cpuHistory}
-      {memoryHistory}
-    />
-  {/if}
   
   <!-- 测试结果 -->
   <TestResults {testResult} />

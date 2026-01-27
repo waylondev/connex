@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 // 导入模块：负载测试特有方法
 use crate::load_test_utils;
+use crate::stats::AsyncStats;
+pub use crate::stats::LoadTestResult;
 
 /// 负载测试配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,28 +24,6 @@ pub fn default_duration_seconds() -> u64 {
 
 
 
-/// 错误类型统计
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ErrorStats {
-    pub connection_errors: u32,
-    pub timeout_errors: u32,
-    pub http_errors: u32,
-    pub other_errors: u32,
-}
-
-/// 负载测试结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoadTestResult {
-    pub total_requests: u32,
-    pub successful_requests: u32,
-    pub failed_requests: u32,
-    pub requests_per_second: f64,
-    pub average_latency: u64, // 毫秒
-    pub error_stats: ErrorStats, // 详细的错误统计
-}
-
-
-
 // 直接使用serde默认值，不需要单独的配置处理函数
 
 
@@ -55,51 +34,12 @@ struct TestConfig {
     url: Arc<String>,
 }
 
-/// 统计类状态：测试过程中会被更新
-struct TestStatistics {
-    successful: Arc<AtomicU32>,
-    failed: Arc<AtomicU32>,
-    total_latency: Arc<AtomicU64>,
-    connection_errors: Arc<AtomicU32>,
-    timeout_errors: Arc<AtomicU32>,
-    http_errors: Arc<AtomicU32>,
-    other_errors: Arc<AtomicU32>,
-}
 
-impl TestStatistics {
-    /// 批量更新统计数据
-    fn update_statistics(
-        &self,
-        local_successful: &mut u32,
-        local_failed: &mut u32,
-        local_latency: &mut u64,
-        local_connection_errors: &mut u32,
-        local_timeout_errors: &mut u32,
-        local_http_errors: &mut u32,
-        local_other_errors: &mut u32,
-    ) {
-        self.successful.fetch_add(*local_successful, Ordering::Relaxed);
-        self.failed.fetch_add(*local_failed, Ordering::Relaxed);
-        self.total_latency.fetch_add(*local_latency, Ordering::Relaxed);
-        self.connection_errors.fetch_add(*local_connection_errors, Ordering::Relaxed);
-        self.timeout_errors.fetch_add(*local_timeout_errors, Ordering::Relaxed);
-        self.http_errors.fetch_add(*local_http_errors, Ordering::Relaxed);
-        self.other_errors.fetch_add(*local_other_errors, Ordering::Relaxed);
-        
-        *local_successful = 0;
-        *local_failed = 0;
-        *local_latency = 0;
-        *local_connection_errors = 0;
-        *local_timeout_errors = 0;
-        *local_http_errors = 0;
-        *local_other_errors = 0;
-    }
-}
 
 /// 测试状态：组合配置和统计
 struct TestState {
     config: Arc<TestConfig>,
-    stats: Arc<TestStatistics>,
+    stats: Arc<AsyncStats>,
 }
 
 /// 类型别名：简化复杂类型
@@ -118,25 +58,8 @@ fn initialize_config(config: &Config) -> Arc<TestConfig> {
 }
 
 /// 初始化测试统计
-fn initialize_statistics() -> Arc<TestStatistics> {
-    let successful = Arc::new(AtomicU32::new(0));
-    let failed = Arc::new(AtomicU32::new(0));
-    let total_latency = Arc::new(AtomicU64::new(0));
-    
-    let connection_errors = Arc::new(AtomicU32::new(0));
-    let timeout_errors = Arc::new(AtomicU32::new(0));
-    let http_errors = Arc::new(AtomicU32::new(0));
-    let other_errors = Arc::new(AtomicU32::new(0));
-    
-    Arc::new(TestStatistics {
-        successful,
-        failed,
-        total_latency,
-        connection_errors,
-        timeout_errors,
-        http_errors,
-        other_errors,
-    })
+fn initialize_statistics() -> Arc<AsyncStats> {
+    Arc::new(AsyncStats::new())
 }
 
 /// 辅助函数：初始化测试状态
@@ -161,72 +84,29 @@ fn spawn_test_tasks(
     end_time: std::time::Instant,
     concurrency: usize
 ) -> TaskList {
-    let mut tasks = Vec::with_capacity(concurrency);
+    let mut tasks = Vec::new();
     
-    for _ in 0..concurrency {
+    // 优化：限制最大任务数量
+    let optimal_task_count = std::cmp::min(concurrency, 100);
+    
+    for _ in 0..optimal_task_count {
         let state = Arc::clone(test_state);
         let end_time = end_time;
         
         let task = tokio::spawn(async move {
-            let mut local_successful = 0;
-            let mut local_failed = 0;
-            let mut local_latency = 0u64;
-            let mut local_connection_errors = 0;
-            let mut local_timeout_errors = 0;
-            let mut local_http_errors = 0;
-            let mut local_other_errors = 0;
-            
+            // 在测试时间内持续发送请求
             while std::time::Instant::now() < end_time {
                 let request_start = std::time::Instant::now();
                 
                 match state.config.client.get(state.config.url.as_str()).send().await {
-                    Ok(response) => {
-                        if response.status().is_success() {
-                            local_successful += 1;
-                            let latency = request_start.elapsed().as_millis() as u64;
-                            local_latency += latency;
-                        } else {
-                            local_failed += 1;
-                            local_http_errors += 1;
-                        }
+                    Ok(_response) => {
+                        let latency = request_start.elapsed().as_millis() as u64;
+                        state.stats.record_success(latency);
                     }
-                    Err(e) => {
-                        local_failed += 1;
-                        
-                        // 优化的错误分类 - 使用match提高性能
-                        match e {
-                            e if e.is_connect() || e.is_request() => local_connection_errors += 1,
-                            e if e.is_timeout() => local_timeout_errors += 1,
-                            e if e.is_status() => local_http_errors += 1,
-                            _ => local_other_errors += 1,
-                        }
+                    Err(_) => {
+                        state.stats.record_failure();
                     }
                 }
-                
-                // 每100个请求批量更新统计，进一步减少原子操作开销
-                if local_successful + local_failed >= 100 {
-                    state.stats.update_statistics(
-                        &mut local_successful,
-                        &mut local_failed,
-                        &mut local_latency,
-                        &mut local_connection_errors,
-                        &mut local_timeout_errors,
-                        &mut local_http_errors,
-                        &mut local_other_errors,
-                    );
-                }
-            }
-            
-            if local_successful + local_failed > 0 {
-                state.stats.update_statistics(
-                    &mut local_successful,
-                    &mut local_failed,
-                    &mut local_latency,
-                    &mut local_connection_errors,
-                    &mut local_timeout_errors,
-                    &mut local_http_errors,
-                    &mut local_other_errors,
-                );
             }
         });
         
@@ -248,10 +128,8 @@ fn generate_test_result(
     test_state: &Arc<TestState>,
     start_time: std::time::Instant
 ) -> LoadTestResult {
-    let result = load_test_utils::generate_test_result(
-        start_time, &test_state.stats.successful, &test_state.stats.failed, &test_state.stats.total_latency,
-        &test_state.stats.connection_errors, &test_state.stats.timeout_errors, &test_state.stats.http_errors, &test_state.stats.other_errors
-    );
+    let duration = start_time.elapsed();
+    let result = test_state.stats.get_results(duration);
     
     // 调用辅助方法打印测试结果
     load_test_utils::print_test_result(&result);

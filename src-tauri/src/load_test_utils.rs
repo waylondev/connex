@@ -1,5 +1,5 @@
-use std::sync::{Arc, atomic::{AtomicU32, AtomicU64}};
-use crate::load_test::{Config, LoadTestResult};
+use crate::load_test::Config;
+use crate::stats::LoadTestResult;
 
 /// 打印测试参数的辅助方法 - 负载测试特有
 pub fn print_test_config(config: &Config) {
@@ -53,49 +53,4 @@ pub fn default_concurrency() -> usize {
     10
 }
 
-/// 计算并生成测试结果 - 负载测试特有
-pub fn generate_test_result(
-    start_time: std::time::Instant,
-    successful: &Arc<AtomicU32>,
-    failed: &Arc<AtomicU32>,
-    total_latency: &Arc<AtomicU64>,
-    connection_errors: &Arc<AtomicU32>,
-    timeout_errors: &Arc<AtomicU32>,
-    http_errors: &Arc<AtomicU32>,
-    other_errors: &Arc<AtomicU32>,
-) -> crate::load_test::LoadTestResult {
-    use std::sync::atomic::Ordering;
-    
-    let elapsed = start_time.elapsed();
-    let total_successful = successful.load(Ordering::Relaxed);
-    let total_failed = failed.load(Ordering::Relaxed);
-    let total_requests = total_successful + total_failed;
-    
-    let avg_latency = if total_successful > 0 {
-        // total_latency已经是毫秒值
-        let total_latency_ms = total_latency.load(Ordering::Relaxed);
-        total_latency_ms / total_successful as u64
-    } else {
-        0
-    };
-    
-    let rps = total_requests as f64 / elapsed.as_secs_f64();
-    
-    // 收集错误统计
-    let error_stats = crate::load_test::ErrorStats {
-        connection_errors: connection_errors.load(Ordering::Relaxed),
-        timeout_errors: timeout_errors.load(Ordering::Relaxed),
-        http_errors: http_errors.load(Ordering::Relaxed),
-        other_errors: other_errors.load(Ordering::Relaxed),
-    };
-    
-    // 创建测试结果
-    crate::load_test::LoadTestResult {
-        total_requests,
-        successful_requests: total_successful,
-        failed_requests: total_failed,
-        requests_per_second: rps,
-        average_latency: avg_latency,
-        error_stats,
-    }
-}
+
